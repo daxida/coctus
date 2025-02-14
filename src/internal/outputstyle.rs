@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use ansi_term::{Color, Style};
 use clashlib::clash::{Clash, Testcase};
 use clashlib::solution::TestResult;
@@ -172,7 +174,7 @@ impl OutputStyle {
 
         if stdout.is_empty() {
             println!("{}", self.dim_color.paint("(no output)"));
-            return
+            return;
         }
 
         let expected_lines = LinesWithEndings::from(&testcase.test_out);
@@ -218,11 +220,47 @@ impl OutputStyle {
         }
     }
 
+    fn format_time(&self, duration: Duration) -> String {
+        let nanos = duration.as_nanos();
+
+        const PRECISION_RULES: [(u128, &str); 4] =
+            [(1_000_000_000, "s"), (1_000_000, "ms"), (1_000, "µs"), (1, "ns")];
+
+        for &(threshold, unit) in PRECISION_RULES.iter() {
+            if nanos >= threshold {
+                let result = nanos as f64 / threshold as f64;
+                // We assume 0 <= result < 1000
+                let mut precision_after_dot = if result >= 100.0 {
+                    1
+                } else if result >= 10.0 {
+                    2
+                } else {
+                    3
+                };
+                // Every other unit measure takes two letters (ms, ns etc.).
+                // Since "s" is the only one with one letter, we add a digit
+                // so we do not have to pad latter on.
+                if unit == "s" {
+                    precision_after_dot += 1;
+                }
+                let style = Style::new().bold().dimmed();
+                let fmt_unit = style.paint(unit);
+                return format!("{:.1$}{fmt_unit}", result, precision_after_dot);
+            }
+        }
+
+        // Should be unreachable since the highest measure expected are seconds...
+        // but if someone else wanted to turn off the timeout and had some code
+        // that takes minutes...
+        format!("{:.1}ns", nanos as f64)
+    }
+
     pub fn print_result(&self, testcase: &Testcase, test_result: &TestResult) {
         let title = self.styled_testcase_title(testcase);
+
         match test_result {
             TestResult::Success { time_taken } => {
-                println!("{} {} ({:.2?})", self.success.paint("PASS"), title, time_taken);
+                println!("{} {} {}", self.success.paint("PASS"), self.format_time(*time_taken), title);
             }
 
             TestResult::UnableToRun { error_msg } => {
